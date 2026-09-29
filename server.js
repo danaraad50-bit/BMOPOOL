@@ -149,6 +149,24 @@ app.post("/api/admin/paid",adminGate,(req,res)=>{const {poolName,paid}=req.body|
 app.post("/api/admin/undo-trade",adminGate,async(req,res)=>{const id=Number(req.body?.tradeId);const t=db.prepare("SELECT * FROM trades WHERE id=? AND undone_at IS NULL").get(id);if(!t)return res.status(404).json({error:"Active trade not found"});db.prepare("UPDATE trades SET undone_at=? WHERE id=?").run(iso(new Date()),id);try{await refresh("undo-trade");}catch(e){console.error(e);}res.json({ok:true,state:latest()});});
 app.get("/api/admin/status",adminGate,(req,res)=>res.json({updatedAt:latest().updatedAt,ageMinutes:ageMinutes(),unmatched:latest().statsQuality?.unmatched||[],trades:tradeRows(false),participants:participants.map(p=>({...p,paid:!!db.prepare("SELECT paid FROM participants_meta WHERE pool_name=?").get(p.poolName)?.paid}))}));
 
-app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"public/index.html")));
+app.get("/*splat",(req,res)=>res.sendFile(path.join(__dirname,"public/index.html")));
 cron.schedule(config.updateSchedule,async()=>{try{await refresh("scheduled");console.log("Scheduled NHL refresh complete");}catch(e){console.error("Scheduled NHL refresh failed:",e.message);}}, {timezone:config.timezone});
 app.listen(PORT,async()=>{console.log(`BMO2026 tracker listening on ${PORT}`);if(!db.prepare("SELECT id FROM snapshots LIMIT 1").get()){try{await refresh("startup");console.log("Initial NHL snapshot saved");}catch(e){console.error("Initial NHL snapshot unavailable:",e.message);}}});
+
+
+function preseasonState() {
+  const state = buildState(emptyStats(), new Date().toISOString());
+  state.updatedAt = null;
+  state.seasonStatus = "not_started";
+  return state;
+}
+
+function latest() {
+  const row = db.prepare(
+    "SELECT data_json FROM snapshots ORDER BY id DESC LIMIT 1"
+  ).get();
+
+  return row
+    ? JSON.parse(row.data_json)
+    : preseasonState();
+}
